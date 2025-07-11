@@ -12,7 +12,7 @@ dependencies = { file = ["requirements.txt"] }
 name = "mfd-dcb"
 description = "A Python module providing cross-platform Data Center Bridging (DCB) configuration and management APIs for Windows, Linux, and FreeBSD systems."
 requires-python = ">=3.10, <3.14"
-version = "1.17.1"
+version = "1.18.0"
 dynamic = ["dependencies"]
 license-files = ["LICENSE.md", "AUTHORS.md"]
 readme = {file = "README.md", content-type = "text/markdown"}
