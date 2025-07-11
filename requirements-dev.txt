@@ -1,0 +1,4 @@
+-r requirements-test.txt
+
+mfd-switchmanagement>=2.18.0
+mfd-code-quality >= 1.2.0, <2
