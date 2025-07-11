@@ -1,0 +1,5 @@
+mfd-common-libs>=1.11.0
+mfd-ethtool>=3.14.0
+mfd-const>=0.23.0
+mfd-typing>=1.23.0
+mfd-sysctl>=1.6.0, < 2
