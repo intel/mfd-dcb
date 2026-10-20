@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Union, Dict, TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any
 import time
 
 from mfd_common_libs import add_logging_level, log_levels, os_supported
@@ -19,6 +19,7 @@ from .data_structures import State
 from .mfd_dcb import Dcb
 import mfd_dcb.dcbnl_wrapper
 import mfd_dcb.dcbtool_wrapper
+import mfd_dcb.dcb_wrapper
 
 
 if TYPE_CHECKING:
@@ -32,6 +33,9 @@ add_logging_level("MODULE_DEBUG", log_levels.MODULE_DEBUG)
 class LinuxDcb(Dcb):
     """Class to handle Dcb in Linux."""
 
+    _ALL_TOOL_NAMES = ("dcb", "dcbnl", "dcbtool")
+    _SETTER_TOOL_NAMES = ("dcb", "dcbtool")
+
     @os_supported(OSName.LINUX)
     def __init__(self, *, connection: "RPyCConnection") -> None:
         """Initialize Linux DCB."""
@@ -39,7 +43,7 @@ class LinuxDcb(Dcb):
         # create object for mfd Ethtool
         self.ethtool_obj = Ethtool(connection=connection)
 
-    def _execute_qos_command_and_check_output(self, cmd_list: Union[List[str], str]) -> str:
+    def _execute_qos_command_and_check_output(self, cmd_list: list[str] | str) -> str:
         """
         Execute command and check output for unexpected problems and try to fix them.
 
@@ -47,58 +51,38 @@ class LinuxDcb(Dcb):
         :returns stdout
         :raises DcbExecutionError: for non zero return code other than known errors.
         """
-        lldpad_fail_recovery_cmd_list = [
-            "systemctl stop lldpad",
-            "systemctl stop lldpad.socket",
-            "systemctl reset-failed lldpad.service",
-            "systemctl start lldpad.socket",
-            "systemctl start lldpad",
-        ]
-        problems_list = [
-            "lldpad.socket failed",
-            "Connection refused",
-            "command timed out",
-            "Device not capable",
-        ]
-        rerun_cmd_after_problem_list = ["Connection refused", "command timed out"]
-        cmd_list = cmd_list if isinstance(cmd_list, list) else [cmd_list]
-        for cmd in cmd_list:
-            cli_out = self._connection.execute_command(cmd, expected_return_codes={})
-            out = cli_out.stdout
-            if any(problem in out for problem in problems_list):
-                if "lldpad.socket failed" in out:
-                    raise DcbExecutionError("lldpad.socket failed Exception")
-                elif "Connection refused" in out:
-                    logger.log(
-                        level=log_levels.MODULE_DEBUG,
-                        msg="Connection refused, stop and start lldp.",
-                    )
-                    print("Connection refused, stop and start lldp.")
-                elif "Device not capable" in out:
-                    raise DcbExecutionError("Please check/update driver")
-                for recovery_cmd in lldpad_fail_recovery_cmd_list:
-                    self._connection.execute_command(
-                        recovery_cmd, custom_exception=DcbExecutionError, expected_return_codes={0, 1}
-                    )
-                for problem in rerun_cmd_after_problem_list:
-                    if problem in out:
-                        logger.log(
-                            level=log_levels.MODULE_DEBUG,
-                            msg=f"Rerun command {cmd} after recovery action, when {problem} occurred.",
-                        )
-                        out += self._connection.execute_command(
-                            cmd, custom_exception=DcbExecutionError, expected_return_codes={0}
-                        ).stdout
-            if cli_out.return_code != 0:
-                raise DcbExecutionError(f"Exception from Unknown Error: {out}")
-        return out
+        return mfd_dcb.dcbtool_wrapper.DcbTool._execute_qos_command_and_check_output(self._connection, cmd_list)
+
+    def _get_tool(
+        self,
+        interface_name: str,
+        tool_name: str,
+        is_setter: bool = False,
+    ) -> object:
+        """Produce particular tool based on tool name.
+
+        :param tool_name: name of tool - dcbnl / dcbtool / dcb.
+        :param interface_name: Name of the Network Interface under Test.
+        :param is_setter: when True, restrict allowed tools to the setter-capable ones (dcbtool, dcb).
+        :raises DcbExecutionError: when tool_name is not a supported tool
+        :return: instance of tool type
+        """
+        allowed_tool_names = self._SETTER_TOOL_NAMES if is_setter else self._ALL_TOOL_NAMES
+        if tool_name not in allowed_tool_names:
+            raise DcbExecutionError(f"Unsupported tool_name '{tool_name}', expected one of {allowed_tool_names}")
+        if tool_name == "dcbtool":
+            return mfd_dcb.dcbtool_wrapper.DcbTool(interface_name, self._connection)
+        elif tool_name == "dcb":
+            return mfd_dcb.dcb_wrapper.DcbCli(interface_name, self._connection)
+        return mfd_dcb.dcbnl_wrapper.Dcbnl(interface_name, self._connection)
 
     def set_ets(
         self,
-        user_priority_mapping: List[(int)],
-        bandwidth_per_traffic_class: List[int],
+        user_priority_mapping: list[(int)],
+        bandwidth_per_traffic_class: list[int],
         interface_name: str,
         mode: str = "ieee",
+        tool_name: str = "dcbtool",
     ) -> None:
         """Set ETS configuration based on User Priority mapping to Traffic Classes and given bandwidth.
 
@@ -108,73 +92,123 @@ class LinuxDcb(Dcb):
         :param bandwidth_per_traffic_class: List of bandwidth percentage values, each integer value is a bandwidth for
         next Traffic Class
         bandwidth_per_traffic_class = [25, 25, 25, 25]
-        :param mode: DCBX mode version - ieee|cee
         :param interface_name: Network adapter
+        :param mode: DCBX mode version - ieee|cee (used by the lldptool (ieee) / dcbtool (cee) path)
+        :param tool_name: name of tool to use. Default "dcbtool" uses the lldptool (ieee) / dcbtool (cee)
+        path selected by mode; "dcb" applies configuration via the iproute2 dcb tool (dcbnl netlink).
         :raises DcbExecutionError: when user_priority_mapping is less or equal to 1 or it is not the same length as
-        bandwidth_per_traffic_class or wrong mode is specified
+        bandwidth_per_traffic_class, when tool_name is unsupported or wrong mode is specified
         :raises DcbExecutionError: when return code of bash command is unexpected
         """
         if not isinstance((user_priority_mapping and bandwidth_per_traffic_class), list):
             raise DcbExecutionError("user_priority_mapping and bandwidth_per_traffic_class must be list")
         if len(user_priority_mapping) != len(bandwidth_per_traffic_class):
             raise DcbExecutionError(
-                "Number of Traffic Classes for User Priority mapping and bandwidth percentage lists must " "be the same"
+                "Number of Traffic Classes for User Priority mapping and bandwidth percentage lists must be the same"
             )
-        if mode.lower() == "ieee":
-            up2tc_list = []
-            up2tc = ",".join(up2tc_list)
-            tcbw = ",".join(map(str, bandwidth_per_traffic_class))
-            tsa = [",".join([f"{i}:ets" for i in range(len(user_priority_mapping))])][0]
-            command_list = [
-                f"lldptool -Ti {interface_name} -V ETS-CFG enableTx=yes willing=no up2tc={up2tc} tcbw={tcbw} tsa={tsa}",
-                f"lldptool -Ti {interface_name} -V ETS-REC enableTx=yes up2tc={up2tc} tcbw={tcbw} tsa={tsa}",
-            ]
-        elif mode.lower() == "cee":
-            pgid_list = [0] * 8
-            pgpct_list = [0] * 8
-            for tc, priorities in enumerate(user_priority_mapping):
-                for prio in priorities:
-                    pgid_list[prio] = tc
-                pgpct_list[tc] = bandwidth_per_traffic_class[tc]
-            pgid = "".join(map(str, pgid_list))
-            pgpct = ",".join(map(str, pgpct_list))
-            command_list = [f"dcbtool sc {interface_name} pg w:0 e:1 a:1 pgid:{pgid} pgpct:{pgpct}"]
-        else:
-            raise DcbExecutionError(f"Incorrect mode: {mode}, expected modes: ieee or cee")
-        self._execute_qos_command_and_check_output(command_list)
+        self._get_tool(interface_name, tool_name, is_setter=True).set_ets(
+            user_priority_mapping, bandwidth_per_traffic_class, mode=mode
+        )
 
     def set_pfc(
         self,
         interface_name: str,
-        pfc_per_priority: List[bool],
+        pfc_per_priority: list[bool],
         mode: str = "ieee",
+        tool_name: str = "dcbtool",
     ) -> None:
         """Turn ON or OFF Priority Flow Control for each User Priority.
 
         :param interface_name: Network adapter
         :param pfc_per_priority: List of 8 Bool values for each priority, True is for PFC ON
-        :param mode: DCBX mode version - ieee|cee
-        :raises DcbExecutionError: when pfc_per_priority list length is not equal to 8 or wrong mode is specified
+        :param mode: DCBX mode version - ieee|cee (used by the lldptool (ieee) / dcbtool (cee) path)
+        :param tool_name: name of tool to use. Default "dcbtool" uses the lldptool (ieee) / dcbtool (cee)
+        path selected by mode; "dcb" applies configuration via the iproute2 dcb tool (dcbnl netlink).
+        :raises DcbExecutionError: when pfc_per_priority list length is not equal to 8, when tool_name is
+        unsupported or wrong mode is specified
         :raises DcbExecutionError: when return code of bash command is unexpected
         """
         if len(pfc_per_priority) != 8:
             raise DcbExecutionError(
-                f"Unexpected length for pfc_per_priority. " f"Expected: 8, actual length: {len(pfc_per_priority)}"
+                f"Unexpected length for pfc_per_priority. Expected: 8, actual length: {len(pfc_per_priority)}"
             )
-        if mode.lower() == "ieee":
-            enabled_list = []
-            for priority, pfc in enumerate(pfc_per_priority):
-                if pfc:
-                    enabled_list.append(priority)
-            enabled = ",".join(map(str, enabled_list))
-            command = f"lldptool -Ti {interface_name} -V PFC enabled={enabled} enableTx=yes willing=no"
-        elif mode.lower() == "cee":
-            pfcup_list = [int(priority) for priority in pfc_per_priority]
-            pfcup = "".join(map(str, pfcup_list))
-            command = f"dcbtool sc {interface_name} pfc w:0 e:1 a:1 pfcup:{pfcup}"
-        else:
-            raise DcbExecutionError(f"Incorrect mode: {mode}, expected modes: ieee or cee")
-        self._execute_qos_command_and_check_output(command)
+        self._get_tool(interface_name, tool_name, is_setter=True).set_pfc(pfc_per_priority, mode=mode)
+
+    def set_app(
+        self,
+        interface_name: str,
+        proto_prio_map: dict | list[tuple],
+        *,
+        selector: str = "dscp-prio",
+        tool_name: str = "dcb",
+    ) -> None:
+        """Add APP (protocol to priority) entries via the iproute2 dcb tool.
+
+        :param interface_name: Network adapter
+        :param proto_prio_map: mapping of protocol to priority, e.g. {26: 3} (DSCP 26 -> priority 3, RoCEv2)
+        :param selector: APP selector, e.g. "dscp-prio" (default), "ethtype-prio", "port-prio"
+        :param tool_name: name of tool to use. Only "dcb" is supported (APP table setting is dcb-tool only).
+        :raises DcbExecutionError: when tool_name is not "dcb", the mapping is invalid or the command fails
+        """
+        if tool_name != "dcb":
+            raise DcbExecutionError('set_app is only supported with tool_name="dcb"')
+        self._get_tool(interface_name, tool_name).set_app(proto_prio_map, selector=selector)
+
+    def del_app(
+        self,
+        interface_name: str,
+        proto_prio_map: dict | list[tuple],
+        *,
+        selector: str = "dscp-prio",
+        tool_name: str = "dcb",
+    ) -> None:
+        """Delete specific APP (protocol to priority) entries via the iproute2 dcb tool.
+
+        :param interface_name: Network adapter
+        :param proto_prio_map: mapping of protocol to priority to remove, e.g. {26: 3}
+        :param selector: APP selector, e.g. "dscp-prio" (default), "ethtype-prio", "port-prio"
+        :param tool_name: name of tool to use. Only "dcb" is supported.
+        :raises DcbExecutionError: when tool_name is not "dcb", the mapping is invalid or the command fails
+        """
+        if tool_name != "dcb":
+            raise DcbExecutionError('del_app is only supported with tool_name="dcb"')
+        self._get_tool(interface_name, tool_name).del_app(proto_prio_map, selector=selector)
+
+    def replace_app(
+        self,
+        interface_name: str,
+        proto_prio_map: dict | list[tuple],
+        *,
+        selector: str = "dscp-prio",
+        tool_name: str = "dcb",
+    ) -> None:
+        """Replace APP (protocol to priority) entries via the iproute2 dcb tool.
+
+        :param interface_name: Network adapter
+        :param proto_prio_map: mapping of protocol to the new priority, e.g. {26: 5} (DSCP 26 -> priority 5)
+        :param selector: APP selector, e.g. "dscp-prio" (default), "ethtype-prio", "port-prio"
+        :param tool_name: name of tool to use. Only "dcb" is supported.
+        :raises DcbExecutionError: when tool_name is not "dcb", the mapping is invalid or the command fails
+        """
+        if tool_name != "dcb":
+            raise DcbExecutionError('replace_app is only supported with tool_name="dcb"')
+        self._get_tool(interface_name, tool_name).replace_app(proto_prio_map, selector=selector)
+
+    def flush_app(
+        self,
+        interface_name: str,
+        selector: str | None = "dscp-prio",
+        *,
+        tool_name: str = "dcb",
+    ) -> None:
+        """Flush the APP table via the iproute2 dcb tool.
+
+        :param tool_name: name of tool to use. Only "dcb" is supported.
+        :raises DcbExecutionError: when tool_name is not "dcb" or the command fails
+        """
+        if tool_name != "dcb":
+            raise DcbExecutionError('flush_app is only supported with tool_name="dcb"')
+        self._get_tool(interface_name, tool_name).flush_app(selector)
 
     def restart_lldpad(self, action: str = "default") -> None:
         """Restart/stop lldpad service and lldp agent daemon.
@@ -293,7 +327,10 @@ class LinuxDcb(Dcb):
         """
         if mode == "ieee":
             willing = "yes" if enable else "no"
-            cmd_list = [f"lldptool -Ti {interface_name} -V CEE-DCBX enableTx=no", "dcbtool sc dcbx v:cee"]
+            cmd_list = [
+                f"lldptool -Ti {interface_name} -V CEE-DCBX enableTx=no",
+                "dcbtool sc dcbx v:cee",
+            ]
             if not is_fwlldp_enabled:
                 lldptool_tlv = f"lldptool -Ti {interface_name} -V"
                 cmd_list.extend(
@@ -305,7 +342,10 @@ class LinuxDcb(Dcb):
                 )
         elif mode == "cee":
             willing = "1" if enable else "0"
-            cmd_list = [f"lldptool -Ti {interface_name} -V CEE-DCBX enableTx=yes", "dcbtool sc dcbx v:force-cee"]
+            cmd_list = [
+                f"lldptool -Ti {interface_name} -V CEE-DCBX enableTx=yes",
+                "dcbtool sc dcbx v:force-cee",
+            ]
             if not is_fwlldp_enabled:
                 cmd_list.extend(
                     [
@@ -324,7 +364,7 @@ class LinuxDcb(Dcb):
         priority: int,
         is_10g_adapter: bool = False,
         is_40g_adapter: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         """Get frame list based on detected adapter.
 
         :param priority: priority number to create proper frame
@@ -355,11 +395,11 @@ class LinuxDcb(Dcb):
     def _get_pfc_counter_dict(
         self,
         out: str,
-        pfc_counters: Dict[str, str],
-        priority: List[int],
-        frame_list: List[bool],
+        pfc_counters: dict[str, str],
+        priority: list[int],
+        frame_list: list[bool],
         adapter_10G: bool = False,
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         """
         pfc_counters dict.
 
@@ -376,7 +416,12 @@ class LinuxDcb(Dcb):
             match = re.search(xframeregex, out, re.MULTILINE)
             if not match:
                 raise DcbExecutionError(f"No match found for {frame_type} for _get_pfc_counter_dict")
-            frame_type_10g = [("tx_pb", "pxon"), ("tx_pb", "pxoff"), ("rx_pb", "pxon"), ("rx_pb", "pxoff")]
+            frame_type_10g = [
+                ("tx_pb", "pxon"),
+                ("tx_pb", "pxoff"),
+                ("rx_pb", "pxon"),
+                ("rx_pb", "pxoff"),
+            ]
             frame_type_non_10g = [
                 ("tx_priority", "xon"),
                 ("tx_priority", "xoff"),
@@ -403,7 +448,7 @@ class LinuxDcb(Dcb):
         interface_name: str,
         is_10g_adapter: bool = False,
         is_40g_adapter: bool = False,
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         """Get PFC counters values for all User Priorities.
 
         :param interface_name: Name of the Network adapter under Test.
@@ -447,7 +492,7 @@ class LinuxDcb(Dcb):
         self,
         interface_name: str,
         tool_name: str = "dcbnl",
-    ) -> Dict[str, Dict[str, str]]:
+    ) -> dict[str, dict[str, str]]:
         """Get complete DCB configuration for ETS, PFC and APP TLVs, local and remote.
 
         :param tool_name: name of tool, dcbnl/dcbtool to get DCB config.
@@ -461,7 +506,7 @@ class LinuxDcb(Dcb):
         self,
         interface_name: str,
         tool_name: str = "dcbnl",
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """
         Get local ETS TLV configuration of the interface.
 
@@ -472,27 +517,11 @@ class LinuxDcb(Dcb):
         self.tool = self._get_tool(tool_name=tool_name, interface_name=interface_name)
         return self.tool.get_ets()
 
-    def _get_tool(
-        self,
-        interface_name: str,
-        tool_name: str = "dcbnl",
-    ) -> object:
-        """Produce particular tool based on tool name.
-
-        :param tool_name: name of tool, dcbtool / dcbnl.
-        :param interface_name: Name of the Network Interface under Test.
-        :return: instance of tool type
-        """
-        if "dcbtool" in tool_name:
-            return mfd_dcb.dcbtool_wrapper.DcbTool(interface_name, self._connection)
-        else:
-            return mfd_dcb.dcbnl_wrapper.Dcbnl(interface_name, self._connection)
-
     def get_app(
         self,
         interface_name: str,
         tool_name: str = "dcbnl",
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """Get local APP TLV configuration of the Interface.
 
         :param tool_name: name of tool (dcbnl/dcbtool) to get local APP TLV config.
@@ -509,7 +538,7 @@ class LinuxDcb(Dcb):
         self,
         interface_name: str,
         tool_name: str = "dcbnl",
-    ) -> Dict[str, Dict[str, Any]]:
+    ) -> dict[str, dict[str, Any]]:
         """Get local PFC TLV configuration of the adapter.
 
         :param tool_name: name of tool, dcbtool/dcbtool
@@ -557,7 +586,11 @@ class LinuxDcb(Dcb):
                 ets_correct = self.verify_ets(interface_name, dcb_map, ets_config=dcb_config.get("LOCAL_ETS"))
                 pfc_correct = self.verify_pfc(interface_name, dcb_map, pfc_config=dcb_config.get("LOCAL_PFC"))
                 app_correct = (
-                    self.verify_app(interface_name, dcb_map, app_config=dcb_config.get("LOCAL_APP", {}))
+                    self.verify_app(
+                        interface_name,
+                        dcb_map,
+                        app_config=dcb_config.get("LOCAL_APP", {}),
+                    )
                     if "LOCAL_APP" in dcb_map
                     else True
                 )
@@ -566,7 +599,10 @@ class LinuxDcb(Dcb):
                     return True
 
             except DcbExecutionError as e:
-                logger.log(level=log_levels.MODULE_DEBUG, msg=f"Could not verify DCB configuration\n{e}")
+                logger.log(
+                    level=log_levels.MODULE_DEBUG,
+                    msg=f"Could not verify DCB configuration\n{e}",
+                )
 
             if attempt < retry:
                 self._retry_logic(switch, switch_port, interval, retry - attempt)
@@ -593,12 +629,15 @@ class LinuxDcb(Dcb):
         if switch and switch_port:
             logger.log(
                 level=log_levels.MODULE_DEBUG,
-                msg='Map did not load correctly, "shutdown",' f'and "no shutdown" port:{switch_port}.',
+                msg=f'Map did not load correctly, "shutdown",and "no shutdown" port:{switch_port}.',
             )
             for status in [True, False]:
                 switch.shutdown(status, switch_port)
                 time.sleep(5)
-        logger.log(level=log_levels.MODULE_DEBUG, msg=f"Retrying in {interval} seconds, {retries_left} tries remaining")
+        logger.log(
+            level=log_levels.MODULE_DEBUG,
+            msg=f"Retrying in {interval} seconds, {retries_left} tries remaining",
+        )
         time.sleep(interval)
 
     def verify_ets(
@@ -729,7 +768,10 @@ class LinuxDcb(Dcb):
                         )
                         correct = False
                 else:
-                    logger.log(level=log_levels.MODULE_DEBUG, msg=f"Missing port {port} in APP TLV")
+                    logger.log(
+                        level=log_levels.MODULE_DEBUG,
+                        msg=f"Missing port {port} in APP TLV",
+                    )
                     correct = False
 
         return correct

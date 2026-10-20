@@ -10,7 +10,14 @@ dcb_obj = LinuxDcb(connection=conn)
 
 user_priority_mapping = [(0, 1), (3, 2), (5, 4), (6, 7)]
 bandwidth_per_traffic_class = [25, 25, 25, 25]
-print(dcb_obj.set_ets(user_priority_mapping, bandwidth_per_traffic_class, interface_name="eth4", mode="ieee"))
+print(
+    dcb_obj.set_ets(
+        user_priority_mapping,
+        bandwidth_per_traffic_class,
+        interface_name="eth4",
+        mode="ieee",
+    )
+)
 pfc_per_priority = [False, True, True, False, False, False, False, False]
 print(dcb_obj.set_pfc(interface_name="eth4", pfc_per_priority=pfc_per_priority))
 print(dcb_obj.restart_lldpad())
@@ -31,3 +38,27 @@ print(dcb_obj.get_dcb(interface_name="eth4", tool_name="dcbtool"))
 print(dcb_obj.get_ets(interface_name="eth4", tool_name="dcbtool"))
 print(dcb_obj.get_app(interface_name="eth4", tool_name="dcbtool"))
 print(dcb_obj.get_pfc(interface_name="eth4", tool_name="dcbtool"))
+
+# iproute2 "dcb" tool (dcbnl netlink) - set configuration
+print(
+    dcb_obj.set_ets(
+        user_priority_mapping,
+        bandwidth_per_traffic_class,
+        interface_name="eth4",
+        tool_name="dcb",
+    )
+)
+print(dcb_obj.set_pfc(interface_name="eth4", pfc_per_priority=pfc_per_priority, tool_name="dcb"))
+
+# APP table management (dcb tool only) - e.g. DSCP 26 -> priority 3 (RoCEv2)
+print(dcb_obj.set_app(interface_name="eth4", proto_prio_map={26: 3}))
+print(dcb_obj.set_app(interface_name="eth4", proto_prio_map={"0x8906": 3}, selector="ethtype-prio"))
+print(dcb_obj.replace_app(interface_name="eth4", proto_prio_map={26: 5}))
+print(dcb_obj.del_app(interface_name="eth4", proto_prio_map={26: 5}))
+print(dcb_obj.flush_app(interface_name="eth4"))
+
+# iproute2 "dcb" tool - read configuration
+print(dcb_obj.get_dcb(interface_name="eth4", tool_name="dcb"))
+print(dcb_obj.get_ets(interface_name="eth4", tool_name="dcb"))
+print(dcb_obj.get_app(interface_name="eth4", tool_name="dcb"))
+print(dcb_obj.get_pfc(interface_name="eth4", tool_name="dcb"))
