@@ -12,9 +12,14 @@ from mfd_connect.base import ConnectionCompletedProcess
 from mfd_typing import OSName
 from mfd_dcb import Dcb
 from mfd_dcb.linux import LinuxDcb
+from mfd_dcb.dcb_wrapper import DcbCli
 from mfd_ethtool import Ethtool
 import mfd_dcb.dcbtool_wrapper
-from mfd_dcb.exceptions import DcbConnectedOSNotSupported, DcbExecutionError, DcbExecutionProcessError
+from mfd_dcb.exceptions import (
+    DcbConnectedOSNotSupported,
+    DcbExecutionError,
+    DcbExecutionProcessError,
+)
 
 
 class TestLinuxDcb:
@@ -25,9 +30,13 @@ class TestLinuxDcb:
     def dcb(self, mocker):
         conn = mocker.create_autospec(RPyCConnection)
         conn.get_os_name.return_value = OSName.LINUX
-        mocker.patch("mfd_ethtool.Ethtool.check_if_available", mocker.create_autospec(Ethtool.check_if_available))
         mocker.patch(
-            "mfd_ethtool.Ethtool.get_version", mocker.create_autospec(Ethtool.get_version, return_value="4.15")
+            "mfd_ethtool.Ethtool.check_if_available",
+            mocker.create_autospec(Ethtool.check_if_available),
+        )
+        mocker.patch(
+            "mfd_ethtool.Ethtool.get_version",
+            mocker.create_autospec(Ethtool.get_version, return_value="4.15"),
         )
         mocker.patch(
             "mfd_ethtool.Ethtool._get_tool_exec_factory",
@@ -57,7 +66,12 @@ class TestLinuxDcb:
         )
         user_priority_mapping = [(0, 1), (2, 3), (4, 5), (6, 7)]
         bandwidth_per_traffic_class = [25, 25, 25, 25]
-        dcb.set_ets(user_priority_mapping, bandwidth_per_traffic_class, interface_name="eth1", mode="ieee")
+        dcb.set_ets(
+            user_priority_mapping,
+            bandwidth_per_traffic_class,
+            interface_name="eth1",
+            mode="ieee",
+        )
 
     def test_set_ets_cee(self, dcb):
         dcb._connection.execute_command.return_value = ConnectionCompletedProcess(
@@ -65,7 +79,12 @@ class TestLinuxDcb:
         )
         user_priority_mapping = [(0, 1), (2, 3), (4, 5), (6, 7)]
         bandwidth_per_traffic_class = [25, 25, 25, 25]
-        dcb.set_ets(user_priority_mapping, bandwidth_per_traffic_class, interface_name="eth1", mode="cee")
+        dcb.set_ets(
+            user_priority_mapping,
+            bandwidth_per_traffic_class,
+            interface_name="eth1",
+            mode="cee",
+        )
 
     def test_execute_qos_command_and_check_output(self, dcb):
         cmd_output = dedent(
@@ -224,7 +243,15 @@ class TestLinuxDcb:
         dcb._connection.execute_command.return_value = ConnectionCompletedProcess(
             args="", stdout="", return_code=0, stderr=""
         )
-        assert dcb.set_willing(interface_name="eth4", enable=False, mode="ieee", is_fwlldp_enabled=False) is None
+        assert (
+            dcb.set_willing(
+                interface_name="eth4",
+                enable=False,
+                mode="ieee",
+                is_fwlldp_enabled=False,
+            )
+            is None
+        )
 
     def test_set_willing_with_cee(self, dcb):
         dcb._connection.execute_command.return_value = ConnectionCompletedProcess(
@@ -402,13 +429,19 @@ class TestLinuxDcb:
             args="", stdout="", return_code=0, stderr=""
         )
         with pytest.raises(
-            DcbExecutionError, match=re.escape("No match found for tx_pb_0_pxon for _get_pfc_counter_dict")
+            DcbExecutionError,
+            match=re.escape("No match found for tx_pb_0_pxon for _get_pfc_counter_dict"),
         ):
             dcb._get_pfc_counter_dict(
                 out="",
                 pfc_counters={0: {}},
                 priority=0,
-                frame_list=["tx_pb_0_pxon", "tx_pb_0_pxoff", "rx_pb_0_pxon", "rx_pb_0_pxoff"],
+                frame_list=[
+                    "tx_pb_0_pxon",
+                    "tx_pb_0_pxoff",
+                    "rx_pb_0_pxon",
+                    "rx_pb_0_pxoff",
+                ],
             )
 
     def test_remove_lldpad_conf(self, dcb):
@@ -515,7 +548,8 @@ class TestLinuxDcb:
         mocker.patch(
             "mfd_dcb.linux.LinuxDcb._get_tool",
             mocker.create_autospec(
-                LinuxDcb._get_tool, return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection)
+                LinuxDcb._get_tool,
+                return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection),
             ),
         )
         dcb._connection.execute_command.return_value = ConnectionCompletedProcess(
@@ -530,7 +564,8 @@ class TestLinuxDcb:
         mocker.patch(
             "mfd_dcb.linux.LinuxDcb._get_tool",
             mocker.create_autospec(
-                LinuxDcb._get_tool, return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection)
+                LinuxDcb._get_tool,
+                return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection),
             ),
         )
         with pytest.raises(DcbExecutionError, match=re.escape("get_app not implemented in dcbtool")):
@@ -567,7 +602,8 @@ class TestLinuxDcb:
         mocker.patch(
             "mfd_dcb.linux.LinuxDcb._get_tool",
             mocker.create_autospec(
-                LinuxDcb._get_tool, return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection)
+                LinuxDcb._get_tool,
+                return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection),
             ),
         )
         dcb._connection.execute_command.return_value = ConnectionCompletedProcess(
@@ -598,7 +634,8 @@ class TestLinuxDcb:
         mocker.patch(
             "mfd_dcb.linux.LinuxDcb._get_tool",
             mocker.create_autospec(
-                LinuxDcb._get_tool, return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection)
+                LinuxDcb._get_tool,
+                return_value=mfd_dcb.dcbtool_wrapper.DcbTool("eth4", dcb._connection),
             ),
         )
         dcb._connection.execute_command.return_value = ConnectionCompletedProcess(
@@ -712,7 +749,16 @@ class TestLinuxDcb:
     def test_verify_pfc(self, dcb, mocker):
         interface_name_mock = "eth0"
         dcb_map_mock = {"LOCAL_PFC": [False, False, False, True, True, False, False, False]}
-        pfc_config_mock = {0: False, 1: False, 2: False, 3: True, 4: True, 5: False, 6: False, 7: False}
+        pfc_config_mock = {
+            0: False,
+            1: False,
+            2: False,
+            3: True,
+            4: True,
+            5: False,
+            6: False,
+            7: False,
+        }
         # Call the verify_pfc method
         assert dcb.verify_pfc(interface_name_mock, dcb_map_mock, pfc_config_mock)
 
@@ -765,3 +811,146 @@ class TestLinuxDcb:
         dcb.get_app.return_value = {"LOCAL_APP": {"3260": {"Priority": 4, "Protocol": "TCP"}}}
         return_value = dcb.verify_app(interface_name_mock, dcb_map_mock)
         assert not return_value
+
+    def _ok(self):
+        return ConnectionCompletedProcess(args="", stdout="", return_code=0, stderr="")
+
+    def test_set_pfc_dcb_tool(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.set_pfc(
+            "eth1",
+            [False, False, False, True, False, False, False, False],
+            tool_name="dcb",
+        )
+        dcb._connection.execute_command.assert_any_call(
+            "dcb pfc set dev eth1 prio-pfc 0:off 1:off 2:off 3:on 4:off 5:off 6:off 7:off",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_set_pfc_lldptool_unchanged(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.set_pfc("eth1", [False, False, False, True, False, False, False, False])
+        dcb._connection.execute_command.assert_any_call(
+            "lldptool -Ti eth1 -V PFC enabled=3 enableTx=yes willing=no",
+            expected_return_codes={},
+        )
+
+    def test_set_ets_dcb_tool(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.set_ets([(0, 1, 2), (3,)], [30, 70], interface_name="eth1", tool_name="dcb")
+        dcb._connection.execute_command.assert_any_call(
+            "dcb ets set dev eth1 willing off tc-tsa 0:ets 1:ets tc-bw 0:30 1:70 prio-tc 0:0 1:0 2:0 3:1",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_set_ets_unsupported_tool_name(self, dcb):
+        with pytest.raises(DcbExecutionError):
+            dcb.set_ets([(0,)], [100], interface_name="eth1", tool_name="dcbb")
+
+    def test_set_pfc_unsupported_tool_name(self, dcb):
+        with pytest.raises(DcbExecutionError):
+            dcb.set_pfc("eth1", [False] * 8, tool_name="dcbnl")
+
+    def test_get_ets_unsupported_tool_name(self, dcb):
+        with pytest.raises(DcbExecutionError):
+            dcb.get_ets(interface_name="eth1", tool_name="dcbnll")
+
+    def test_set_app_dcb_tool(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.set_app("eth1", {26: 3})
+        dcb._connection.execute_command.assert_called_once_with(
+            "dcb app add dev eth1 dscp-prio 26:3",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_set_app_dcb_tool_multiple(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.set_app("eth1", [(26, 3), (30, 3)])
+        dcb._connection.execute_command.assert_any_call(
+            "dcb app add dev eth1 dscp-prio 26:3 30:3",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_set_app_dcb_tool_custom_selector(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.set_app("eth1", {"0x8906": 3}, selector="ethtype-prio")
+        dcb._connection.execute_command.assert_called_once_with(
+            "dcb app add dev eth1 ethtype-prio 0x8906:3",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_del_app_dcb_tool(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.del_app("eth1", {26: 3})
+        dcb._connection.execute_command.assert_any_call(
+            "dcb app del dev eth1 dscp-prio 26:3",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_del_app_dcb_tool_custom_selector(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.del_app("eth1", {3260: 3}, selector="port-prio")
+        dcb._connection.execute_command.assert_called_once_with(
+            "dcb app del dev eth1 port-prio 3260:3",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_replace_app_dcb_tool(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.replace_app("eth1", {26: 5})
+        dcb._connection.execute_command.assert_any_call(
+            "dcb app replace dev eth1 dscp-prio 26:5",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_replace_app_dcb_tool_custom_selector(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.replace_app("eth1", {"0x8906": 5}, selector="ethtype-prio")
+        dcb._connection.execute_command.assert_called_once_with(
+            "dcb app replace dev eth1 ethtype-prio 0x8906:5",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_flush_app_dcb_tool(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.flush_app("eth1")
+        dcb._connection.execute_command.assert_any_call(
+            "dcb app flush dev eth1 dscp-prio",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_flush_app_all_selectors(self, dcb):
+        dcb._connection.execute_command.return_value = self._ok()
+        dcb.flush_app("eth1", selector=None)
+        dcb._connection.execute_command.assert_any_call(
+            "dcb app flush dev eth1",
+            custom_exception=DcbExecutionProcessError,
+            expected_return_codes=[0],
+        )
+
+    def test_app_methods_require_dcb_tool(self, dcb):
+        with pytest.raises(DcbExecutionError):
+            dcb.set_app("eth1", {26: 3}, tool_name="dcbnl")
+        with pytest.raises(DcbExecutionError):
+            dcb.replace_app("eth1", {26: 3}, tool_name="dcbnl")
+        with pytest.raises(DcbExecutionError):
+            dcb.del_app("eth1", {26: 3}, tool_name="dcbnl")
+        with pytest.raises(DcbExecutionError):
+            dcb.flush_app("eth1", tool_name="dcbnl")
+
+    def test_get_tool_returns_dcb_cli(self, dcb):
+        assert isinstance(dcb._get_tool("eth1", tool_name="dcb"), DcbCli)
+
+    def test_set_app_empty_map(self, dcb):
+        with pytest.raises(DcbExecutionError):
+            dcb.set_app("eth1", {})

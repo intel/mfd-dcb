@@ -5,7 +5,7 @@
 
 import re
 
-from typing import Dict, TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any
 from mfd_const.qos import LOCAL_ETS, LOCAL_PFC, LOCAL_APP, DCB_TOOL_PATH_LNX
 from .exceptions import DcbExecutionError, DcbExecutionProcessError
 
@@ -25,7 +25,7 @@ class Dcbnl:
         self.interface_name = interface_name
         self._connection = connection
 
-    def get_dcb(self) -> Dict[str, Dict[str, Any]]:
+    def get_dcb(self) -> dict[str, dict[str, Any]]:
         """Get complete DCB configuration for ETS, PFC and APP TLVs, local and remote.
 
         :return: Dictionary of QoS configuration
@@ -36,7 +36,7 @@ class Dcbnl:
         qos.update(self.get_app(from_cache=True))
         return qos
 
-    def get_ets(self, from_cache: bool = False) -> Dict[str, Dict[str, Any]]:
+    def get_ets(self, from_cache: bool = False) -> dict[str, dict[str, Any]]:
         """Get local ETS TLV configuration of the interface_name.
 
         :param from_cache: use current configuration output
@@ -46,7 +46,7 @@ class Dcbnl:
             self._read_qos_configuration()
         return self._parse_ets(LOCAL_ETS)
 
-    def get_pfc(self, from_cache: bool = False) -> Dict[str, bool]:
+    def get_pfc(self, from_cache: bool = False) -> dict[str, bool]:
         """Get local PFC TLV configuration of the interface_name.
 
         :param from_cache: use current configuration output
@@ -56,7 +56,7 @@ class Dcbnl:
             self._read_qos_configuration()
         return self._parse_pfc(LOCAL_PFC)
 
-    def get_app(self, from_cache: bool = False) -> Dict[str, Dict[str, Any]]:
+    def get_app(self, from_cache: bool = False) -> dict[str, dict[str, Any]]:
         """Get local APP TLV configuration of the interface_name.
 
         :param from_cache: use current configuration output
@@ -81,7 +81,7 @@ class Dcbnl:
             raise DcbExecutionError(f"Error while executing dcbnl {command}: {output.stderr}")
         self._qos_output = output.stdout
 
-    def _parse_ets(self, key: str) -> Dict[str, Dict[str, int]]:
+    def _parse_ets(self, key: str) -> dict[str, dict[str, int]]:
         """Get local or remote QoS traffic classes as dictionary.
 
         :param key: key in configuration dictionary for ETS
@@ -108,7 +108,7 @@ class Dcbnl:
                 continue
         return {key: ets_config}
 
-    def _parse_pfc(self, key: str) -> Dict[str, bool]:
+    def _parse_pfc(self, key: str) -> dict[str, bool]:
         """Get operational or remote QoS flow control as dictionary.
 
         :param key: key in configuration dictionary for PFC
@@ -122,7 +122,7 @@ class Dcbnl:
                 pfc_config[i] = pfc_bin & (pow(2, i)) > 0
         return {key: pfc_config}
 
-    def _parse_app(self, key: str) -> Dict[str, Dict[str, str]]:
+    def _parse_app(self, key: str) -> dict[str, dict[str, str]]:
         """Get operational or remote QoS apps table.
 
         :param key: key in configuration dictionary for PFC
